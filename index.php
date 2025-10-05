@@ -1,510 +1,529 @@
-<?php
-session_start();
-
-// === Load config DB ===
-$cfg_ir = __DIR__ . '/config/db_irigasi.php';
-$cfg_hm = __DIR__ . '/config/db_hama.php';
-
-require_once $cfg_ir;
-require_once $cfg_hm;
-
-if (!isset($db_irigasi) || !($db_irigasi instanceof mysqli)) die("Koneksi DB irigasi gagal.");
-if (!isset($db_hama) || !($db_hama instanceof mysqli)) die("Koneksi DB hama gagal.");
-
-// ===== Statistik Irigasi =====
-$stat_irigasi = ['soil'=>'-','ph'=>'-','pompa'=>'-','jadwal'=>0];
-$q = $db_irigasi->query("SELECT soil_moisture, ph, pompa_status FROM sensor_data ORDER BY waktu DESC LIMIT 1");
-if ($q && $row=$q->fetch_assoc()) {
-  $stat_irigasi['soil']=$row['soil_moisture']; $stat_irigasi['ph']=$row['ph']; $stat_irigasi['pompa']=$row['pompa_status'];
-}
-$q = $db_irigasi->query("SELECT COUNT(*) AS jml FROM penyiraman_air");
-if ($q && $row=$q->fetch_assoc()) $stat_irigasi['jadwal']=$row['jml'];
-
-// ===== Statistik Hama =====
-$stat_hama = ['suhu'=>'-','hum'=>'-','hujan'=>'-','angin'=>'-','aturan'=>0];
-$q=$db_hama->query("SELECT suhu, kelembaban FROM dht_data ORDER BY waktu DESC LIMIT 1");
-if ($q && $row=$q->fetch_assoc()) {$stat_hama['suhu']=$row['suhu']; $stat_hama['hum']=$row['kelembaban'];}
-$q=$db_hama->query("SELECT nilai FROM curah_hujan ORDER BY waktu DESC LIMIT 1");
-if ($q && $row=$q->fetch_assoc()) $stat_hama['hujan']=$row['nilai'];
-$q=$db_hama->query("SELECT kecepatan FROM anemometer ORDER BY waktu DESC LIMIT 1");
-if ($q && $row=$q->fetch_assoc()) $stat_hama['angin']=$row['kecepatan'];
-$q=$db_hama->query("SELECT COUNT(*) AS jml FROM aturan_hama");
-if ($q && $row=$q->fetch_assoc()) $stat_hama['aturan']=$row['jml'];
-
-// ===== Data untuk grafik (10 terakhir) =====
-$chart_irigasi = ['labels'=>[], 'soil'=>[], 'ph'=>[]];
-$q = $db_irigasi->query("SELECT waktu, soil_moisture, ph FROM sensor_data ORDER BY waktu DESC LIMIT 10");
-$data = [];
-while($row=$q->fetch_assoc()) $data[]=$row;
-$data = array_reverse($data);
-foreach($data as $d){
-  $chart_irigasi['labels'][]=$d['waktu'];
-  $chart_irigasi['soil'][]=$d['soil_moisture'];
-  $chart_irigasi['ph'][]=$d['ph'];
-}
-
-$chart_hama = ['labels'=>[], 'suhu'=>[], 'hum'=>[], 'hujan'=>[], 'angin'=>[]];
-$q = $db_hama->query("SELECT waktu, suhu, kelembaban FROM dht_data ORDER BY waktu DESC LIMIT 10");
-$data=[]; while($row=$q->fetch_assoc()) $data[]=$row; $data=array_reverse($data);
-foreach($data as $d){
-  $chart_hama['labels'][]=$d['waktu'];
-  $chart_hama['suhu'][]=$d['suhu'];
-  $chart_hama['hum'][]=$d['kelembaban'];
-}
-$q = $db_hama->query("SELECT waktu, nilai FROM curah_hujan ORDER BY waktu DESC LIMIT 10");
-$data=[]; while($row=$q->fetch_assoc()) $data[]=$row; $data=array_reverse($data);
-foreach($data as $d){ $chart_hama['hujan'][]=$d['nilai']; }
-$q = $db_hama->query("SELECT waktu, kecepatan FROM anemometer ORDER BY waktu DESC LIMIT 10");
-$data=[]; while($row=$q->fetch_assoc()) $data[]=$row; $data=array_reverse($data);
-foreach($data as $d){ $chart_hama['angin'][]=$d['kecepatan']; }
-?>
 <!DOCTYPE html>
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <title>Dashboard IoT Gabungan - Sistem Monitoring Pertanian Cerdas</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Pamotan</title>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
     :root {
-      --primary-green: #2e7d32;
-      --light-green: #4caf50;
-      --dark-green: #1b5e20;
-      --earth-brown: #795548;
-      --sky-blue: #29b6f6;
-      --sun-yellow: #ffc107;
-      --water-blue: #0288d1;
-      --danger-red: #f44336;
+      --primary: #1b5e20;
+      --primary-light: #4caf50;
+      --primary-lighter: #81c784;
+      --primary-lightest: #e8f5e9;
+      --accent: #ff9800;
+      --text-dark: #2e7d32;
+      --text-light: #ffffff;
+      --gradient-primary: linear-gradient(135deg, #1b5e20 0%, #4caf50 100%);
+      --gradient-hero: linear-gradient(rgba(27, 94, 32, 0.85), rgba(76, 175, 80, 0.8));
+      --shadow: 0 8px 30px rgba(0,0,0,0.12);
+      --shadow-hover: 0 15px 40px rgba(0,0,0,0.15);
     }
-    
+
     body {
-      background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      min-height: 100vh;
-      position: relative;
+      font-family: 'Poppins', sans-serif;
+      background: linear-gradient(135deg, #f4f9f4 0%, #e8f5e9 100%);
+      color: var(--text-dark);
+      line-height: 1.7;
       overflow-x: hidden;
     }
-    
-    body::before {
-      content: "";
+
+    .hero {
+      background: var(--gradient-hero), url('assets/img/desa-bg.jpg') center/cover no-repeat;
+      color: var(--text-light);
+      text-align: center;
+      padding: 100px 20px;
+      border-radius: 0 0 40px 40px;
+      position: relative;
+      overflow: hidden;
+      min-height: 80vh;
+      display: flex;
+      align-items: center;
+    }
+
+    .hero::before {
+      content: '';
       position: absolute;
       top: 0;
       left: 0;
+      right: 0;
+      bottom: 0;
+      background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 100" fill="%23ffffff" opacity="0.1"><polygon points="1000,100 1000,0 0,100"/></svg>');
+      background-size: cover;
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 2;
       width: 100%;
-      height: 100%;
-      background-image: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100" viewBox="0 0 100 100"><rect fill="none" width="100" height="100"/><path fill="%234caf50" opacity="0.1" d="M0,0 L100,0 L100,100 L0,100 Z M20,20 L80,20 L80,80 L20,80 Z"/></svg>');
-      z-index: -1;
     }
-    
-    .header-container {
-      background: linear-gradient(90deg, var(--primary-green) 0%, var(--light-green) 100%);
-      border-radius: 15px;
-      padding: 20px;
-      margin-bottom: 30px;
-      box-shadow: 0 10px 20px rgba(0,0,0,0.1);
-      color: white;
-      position: relative;
-      overflow: hidden;
+
+    .hero h1 {
+      font-weight: 700;
+      font-size: clamp(1.8rem, 5vw, 3.2rem);
+      margin-bottom: 1rem;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+      line-height: 1.2;
     }
-    
-    .header-container::before {
-      content: "";
-      position: absolute;
-      top: -50%;
-      left: -50%;
-      width: 200%;
-      height: 200%;
-      background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
-      z-index: 0;
+
+    .hero p {
+      font-size: clamp(1rem, 3vw, 1.3rem);
+      margin-bottom: 2rem;
+      opacity: 0.95;
+      font-weight: 400;
+      line-height: 1.5;
     }
-    
-    .header-content {
-      position: relative;
-      z-index: 1;
-    }
-    
-    .card {
-      border-radius: 15px;
-      border: none;
-      box-shadow: 0 10px 20px rgba(0,0,0,0.08);
-      transition: box-shadow 0.3s;
-      overflow: hidden;
-      background: rgba(255, 255, 255, 0.9);
-      backdrop-filter: blur(10px);
-    }
-    
-    .card:hover {
-      box-shadow: 0 15px 30px rgba(0,0,0,0.15);
-    }
-    
-    .card-title {
-      color: var(--primary-green);
+
+    .hero .btn {
+      margin: 8px 6px;
+      border-radius: 50px;
+      padding: 14px 28px;
       font-weight: 600;
-      border-bottom: 2px solid var(--light-green);
-      padding-bottom: 10px;
-      margin-bottom: 15px;
+      font-size: clamp(0.9rem, 2vw, 1rem);
+      border: none;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+      display: inline-block;
+      min-width: 180px;
+    }
+
+    .hero .btn-light {
+      background: rgba(255,255,255,0.95);
+      color: var(--primary);
+    }
+
+    .hero .btn-success {
+      background: rgba(255,255,255,0.2);
+      backdrop-filter: blur(10px);
+      border: 2px solid rgba(255,255,255,0.3);
+      color: white;
+    }
+
+    .logo-container {
+      margin-bottom: 1.5rem;
+    }
+
+    .logo-container img {
+      width: clamp(80px, 20vw, 120px);
+      height: clamp(80px, 20vw, 120px);
+      border-radius: 50%;
+      border: 4px solid rgba(255,255,255,0.3);
+      box-shadow: 0 8px 25px rgba(0,0,0,0.2);
+    }
+
+    .section-title {
+      text-align: center;
+      margin: 60px 0 40px;
+      font-weight: 700;
+      color: var(--primary);
+      position: relative;
+      font-size: clamp(1.5rem, 4vw, 2rem);
+    }
+
+    .section-title::after {
+      content: '';
+      display: block;
+      width: 60px;
+      height: 4px;
+      background: var(--gradient-primary);
+      margin: 15px auto;
+      border-radius: 2px;
+    }
+
+    .card {
+      border: none;
+      border-radius: 20px;
+      overflow: hidden;
+      background: white;
+      margin-bottom: 1.5rem;
+      box-shadow: var(--shadow);
+    }
+
+    .card-body {
+      padding: 1.5rem;
+      position: relative;
+    }
+
+    .card-body::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: var(--gradient-primary);
+    }
+
+    .card h4 {
+      font-weight: 700;
+      margin-bottom: 1.2rem;
       display: flex;
       align-items: center;
+      gap: 10px;
+      font-size: clamp(1.1rem, 3vw, 1.3rem);
     }
-    
-    .card-title i {
-      margin-right: 10px;
-      font-size: 1.5rem;
+
+    .card h4 i {
+      font-size: 1.2rem;
     }
-    
-    .stat-item {
+
+    .stat-list {
+      list-style: none;
+      padding: 0;
+      margin-bottom: 1.5rem;
+    }
+
+    .stat-list li {
+      padding: 10px 0;
+      border-bottom: 1px solid #e8f5e9;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 10px 0;
-      border-bottom: 1px dashed #e0e0e0;
+      font-weight: 500;
+      font-size: clamp(0.85rem, 2.5vw, 0.95rem);
+      flex-wrap: wrap;
     }
-    
-    .stat-item:last-child {
+
+    .stat-list li:last-child {
       border-bottom: none;
     }
-    
+
     .stat-value {
-      font-weight: 600;
-      color: var(--dark-green);
-      background: #e8f5e9;
+      background: var(--primary-lightest);
+      color: var(--primary);
       padding: 5px 10px;
-      border-radius: 20px;
-      font-size: 0.9rem;
-    }
-    
-    .btn-custom {
-      border-radius: 25px;
-      padding: 10px 25px;
+      border-radius: 15px;
       font-weight: 600;
-      transition: box-shadow 0.3s;
-      border: none;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      font-size: clamp(0.8rem, 2vw, 0.9rem);
+      margin-left: 8px;
+      white-space: nowrap;
     }
-    
-    .btn-irigasi {
-      background: linear-gradient(45deg, var(--water-blue), var(--sky-blue));
+
+    .feature-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr));
+      gap: 1.5rem;
+      margin-top: 2rem;
+    }
+
+    .feature-card {
+      background: white;
+      padding: 1.5rem;
+      border-radius: 20px;
+      text-align: center;
+      box-shadow: var(--shadow);
+      border: 1px solid #e8f5e9;
+      height: 100%;
+    }
+
+    .feature-icon {
+      width: 70px;
+      height: 70px;
+      margin: 0 auto 1.2rem;
+      background: var(--gradient-primary);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.8rem;
       color: white;
     }
-    
-    .btn-hama {
-      background: linear-gradient(45deg, var(--danger-red), #ff9800);
-      color: white;
+
+    .feature-card h5 {
+      font-size: clamp(1rem, 2.5vw, 1.2rem);
+      margin-bottom: 0.8rem;
+      font-weight: 600;
     }
-    
-    .btn-custom:hover {
-      box-shadow: 0 6px 12px rgba(0,0,0,0.15);
+
+    .feature-card p {
+      font-size: clamp(0.85rem, 2vw, 0.95rem);
+      line-height: 1.5;
+      margin: 0;
     }
-    
-    .card-body {
-      padding: 25px;
+
+    footer {
+      background: var(--gradient-primary);
+      color: var(--text-light);
+      text-align: center;
+      padding: 30px 20px;
+      margin-top: 60px;
+      border-radius: 40px 40px 0 0;
+      position: relative;
     }
-    
-    .nature-decoration {
+
+    footer::before {
+      content: '';
       position: absolute;
-      z-index: 0;
-      opacity: 0.1;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 4px;
+      background: var(--accent);
     }
-    
-    .leaf-1 {
-      top: 10%;
-      left: 5%;
-      font-size: 120px;
-      color: var(--primary-green);
-      transform: rotate(-15deg);
+
+    .footer-content {
+      max-width: 600px;
+      margin: 0 auto;
     }
-    
-    .leaf-2 {
-      bottom: 10%;
-      right: 5%;
-      font-size: 100px;
-      color: var(--light-green);
-      transform: rotate(25deg);
-    }
-    
-    .status-badge {
-      display: inline-block;
-      padding: 5px 12px;
-      border-radius: 20px;
-      font-size: 0.8rem;
+
+    .footer-content p {
+      margin-bottom: 0.5rem;
       font-weight: 600;
+      font-size: clamp(0.9rem, 2.5vw, 1rem);
     }
-    
-    .status-on {
-      background-color: #c8e6c9;
-      color: var(--dark-green);
+
+    .footer-content small {
+      opacity: 0.9;
+      font-size: clamp(0.8rem, 2vw, 0.9rem);
     }
-    
-    .status-off {
-      background-color: #ffcdd2;
-      color: var(--danger-red);
-    }
-    
+
     .chart-container {
       position: relative;
-      height: 250px;
-      margin-top: 20px;
+      height: 180px;
+      margin-top: 1.2rem;
     }
-    
-    .system-status {
+
+    /* Mobile-specific improvements */
+    .mobile-optimized-text {
+      font-size: clamp(0.9rem, 2.5vw, 1rem);
+      line-height: 1.6;
+    }
+
+    .mobile-tap-target {
+      min-height: 44px;
+      min-width: 44px;
+    }
+
+    /* Button container for better mobile layout */
+    .btn-container {
       display: flex;
+      flex-wrap: wrap;
       justify-content: center;
-      gap: 20px;
-      margin-top: 20px;
+      gap: 10px;
+      margin-top: 1.5rem;
     }
-    
-    .status-card {
-      background: white;
-      border-radius: 10px;
-      padding: 15px;
-      text-align: center;
-      box-shadow: 0 4px 8px rgba(0,0,0,0.05);
-      flex: 1;
-      max-width: 200px;
+
+    /* Extra small devices */
+    @media (max-width: 576px) {
+      .hero {
+        padding: 80px 15px;
+        border-radius: 0 0 30px 30px;
+        min-height: 70vh;
+      }
+
+      .hero .btn {
+        padding: 12px 24px;
+        min-width: 160px;
+        margin: 6px 4px;
+      }
+
+      .btn-container {
+        flex-direction: column;
+        align-items: center;
+      }
+
+      .btn-container .btn {
+        width: 100%;
+        max-width: 250px;
+      }
+
+      .card-body {
+        padding: 1.2rem;
+      }
+
+      .feature-card {
+        padding: 1.2rem;
+      }
+
+      .feature-icon {
+        width: 60px;
+        height: 60px;
+        font-size: 1.5rem;
+      }
+
+      .section-title {
+        margin: 50px 0 30px;
+      }
+
+      footer {
+        padding: 25px 15px;
+        margin-top: 50px;
+        border-radius: 30px 30px 0 0;
+      }
+
+      .stat-list li {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+      }
+
+      .stat-value {
+        margin-left: 0;
+        align-self: flex-start;
+      }
     }
-    
-    .status-card i {
-      font-size: 2rem;
-      margin-bottom: 10px;
+
+    /* Very small devices */
+    @media (max-width: 380px) {
+      .hero {
+        padding: 60px 12px;
+      }
+
+      .hero h1 {
+        font-size: 1.6rem;
+      }
+
+      .hero p {
+        font-size: 0.95rem;
+      }
+
+      .logo-container img {
+        width: 70px;
+        height: 70px;
+      }
+
+      .card-body {
+        padding: 1rem;
+      }
+
+      .feature-grid {
+        gap: 1rem;
+      }
+
+      .feature-card {
+        padding: 1rem;
+      }
+
+      .chart-container {
+        height: 160px;
+      }
     }
-    
-    .status-online {
-      color: var(--light-green);
+
+    /* Landscape orientation for mobile */
+    @media (max-height: 500px) and (orientation: landscape) {
+      .hero {
+        min-height: auto;
+        padding: 60px 20px;
+      }
+
+      .logo-container {
+        margin-bottom: 1rem;
+      }
+
+      .logo-container img {
+        width: 60px;
+        height: 60px;
+      }
+
+      .hero h1 {
+        margin-bottom: 0.5rem;
+      }
+
+      .hero p {
+        margin-bottom: 1rem;
+      }
     }
-    
-    .status-offline {
-      color: #9e9e9e;
+
+    /* Prevent horizontal scroll */
+    .container {
+      max-width: 100%;
+      padding-left: 15px;
+      padding-right: 15px;
     }
   </style>
 </head>
 <body>
-  <div class="nature-decoration leaf-1">
-    <i class="fas fa-leaf"></i>
-  </div>
-  <div class="nature-decoration leaf-2">
-    <i class="fas fa-seedling"></i>
-  </div>
-  
-  <div class="container my-5">
-    <div class="header-container">
-      <div class="header-content text-center">
-        <h1 class="display-4 fw-bold"><i class="fas fa-tree"></i> Sistem IoT Pertanian Cerdas</h1>
-        <p class="lead">Monitor dan kelola sistem irigasi serta deteksi hama secara real-time</p>
-        <div class="system-status">
-          <div class="status-card">
-            <i class="fas fa-tint status-online"></i>
-            <div>Sistem Irigasi</div>
-            <small class="text-success">Online</small>
-          </div>
-          <div class="status-card">
-            <i class="fas fa-bug status-online"></i>
-            <div>Deteksi Hama</div>
-            <small class="text-success">Online</small>
-          </div>
-        </div>
-      </div>
+
+<!-- Hero Section -->
+<section class="hero">
+  <div class="hero-content">
+    <div class="logo-container">
+      <img src="img/image.png" alt="Logo Desa Pamotan">
     </div>
+    <h1>Sistem Digitalisasi Desa Pamotan</h1>
+    <p>Mewujudkan Pertanian Cerdas Berbasis IoT — Irigasi & Pendeteksi Hama Otomatis</p>
+    <div class="btn-container">
+      <a href="irigasi/login.php" class="btn btn-light mobile-tap-target">
+        <i class="fas fa-tint me-2"></i>Sistem Irigasi
+      </a>
+      <a href="hama/auth/login.php" class="btn btn-success mobile-tap-target">
+        <i class="fas fa-bug me-2"></i>Pendeteksi Hama
+      </a>
+    </div>
+  </div>
+</section>
 
-    <div class="row g-4">
-      <!-- Card Irigasi -->
-      <div class="col-md-6">
-        <div class="card">
-          <div class="card-body">
-            <h4 class="card-title"><i class="fas fa-tint"></i> Sistem Irigasi Cerdas</h4>
-            <div class="stat-list">
-              <div class="stat-item">
-                <span><i class="fas fa-seedling me-2"></i> Kelembaban Tanah:</span>
-                <span class="stat-value"><?= $stat_irigasi['soil']; ?>%</span>
-              </div>
-              <div class="stat-item">
-                <span><i class="fas fa-flask me-2"></i> Tingkat pH:</span>
-                <span class="stat-value"><?= $stat_irigasi['ph']; ?></span>
-              </div>
-              <div class="stat-item">
-                <span><i class="fas fa-power-off me-2"></i> Status Pompa:</span>
-                <span class="status-badge <?= $stat_irigasi['pompa'] == 'ON' ? 'status-on' : 'status-off'; ?>">
-                  <?= $stat_irigasi['pompa']; ?>
-                </span>
-              </div>
-              <div class="stat-item">
-                <span><i class="far fa-calendar-alt me-2"></i> Jadwal Penyiraman:</span>
-                <span class="stat-value"><?= $stat_irigasi['jadwal']; ?> aktif</span>
-              </div>
-            </div>
-            <div class="chart-container">
-              <canvas id="chartIrigasi"></canvas>
-            </div>
-            <div class="text-center mt-4">
-              <a href="irigasi/login.php" class="btn btn-custom btn-irigasi">
-                <i class="fas fa-sign-in-alt me-2"></i>Masuk ke Sistem Irigasi
-              </a>
-            </div>
-          </div>
-        </div>
-      </div>
+<div class="container">
 
-      <!-- Card Hama -->
-      <div class="col-md-6">
-        <div class="card">
-          <div class="card-body">
-            <h4 class="card-title"><i class="fas fa-bug"></i> Sistem Deteksi Hama</h4>
-            <div class="stat-list">
-              <div class="stat-item">
-                <span><i class="fas fa-thermometer-half me-2"></i> Suhu:</span>
-                <span class="stat-value"><?= $stat_hama['suhu']; ?> °C</span>
-              </div>
-              <div class="stat-item">
-                <span><i class="fas fa-tint me-2"></i> Kelembaban Udara:</span>
-                <span class="stat-value"><?= $stat_hama['hum']; ?>%</span>
-              </div>
-              <div class="stat-item">
-                <span><i class="fas fa-cloud-rain me-2"></i> Curah Hujan:</span>
-                <span class="stat-value"><?= $stat_hama['hujan']; ?> mm</span>
-              </div>
-              <div class="stat-item">
-                <span><i class="fas fa-wind me-2"></i> Kecepatan Angin:</span>
-                <span class="stat-value"><?= $stat_hama['angin']; ?> km/jam</span>
-              </div>
-              <div class="stat-item">
-                <span><i class="fas fa-ruler-combined me-2"></i> Aturan Hama:</span>
-                <span class="stat-value"><?= $stat_hama['aturan']; ?> terdeteksi</span>
-              </div>
-            </div>
-            <div class="chart-container">
-              <canvas id="chartHama"></canvas>
-            </div>
-            <div class="text-center mt-4">
-              <a href="hama/auth/login.php" class="btn btn-custom btn-hama">
-                <i class="fas fa-sign-in-alt me-2"></i>Masuk ke Deteksi Hama
-              </a>
-            </div>
-          </div>
-        </div>
-      </div>
+  <!-- Profil Desa -->
+  <h2 class="section-title">Profil Desa Pamotan</h2>
+  <div class="card shadow-sm mb-4">
+    <div class="card-body">
+      <p class="mobile-optimized-text"><strong>Desa Pamotan</strong> merupakan pelopor desa digital di wilayahnya yang menerapkan sistem pertanian modern berbasis Internet of Things (IoT). 
+      Sistem ini mengintegrasikan teknologi sensor untuk pemantauan kondisi tanah, iklim, dan potensi serangan hama secara otomatis dan real-time.</p>
+      <p class="mobile-optimized-text">Dengan dukungan dari pemerintah desa dan kelompok tani, Desa Pamotan berkomitmen untuk mewujudkan konsep <em>Smart Village</em> dan <em>Smart Farming</em> 
+      demi meningkatkan produktivitas serta keberlanjutan lingkungan.</p>
     </div>
   </div>
 
-  <script>
-    const irigasiData = <?= json_encode($chart_irigasi); ?>;
-    const hamaData = <?= json_encode($chart_hama); ?>;
+  <!-- Fitur Unggulan -->
+  <h2 class="section-title">Fitur Unggulan Sistem</h2>
+  <div class="feature-grid">
+    <div class="feature-card">
+      <div class="feature-icon">
+        <i class="fas fa-cloud-sun"></i>
+      </div>
+      <h5>Monitoring Real-time</h5>
+      <p>Pemantauan kondisi lingkungan dan tanaman secara real-time dengan update data setiap menit</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">
+        <i class="fas fa-robot"></i>
+      </div>
+      <h5>Otomatisasi Cerdas</h5>
+      <p>Sistem irigasi dan deteksi hama bekerja otomatis berdasarkan kondisi lingkungan aktual</p>
+    </div>
+    <div class="feature-card">
+      <div class="feature-icon">
+        <i class="fas fa-chart-line"></i>
+      </div>
+      <h5>Analitik Data</h5>
+      <p>Visualisasi data yang mudah dipahami untuk pengambilan keputusan yang lebih baik</p>
+    </div>
+  </div>
 
-    // Format waktu untuk label grafik
-    function formatTimeLabel(fullTime) {
-      const date = new Date(fullTime);
-      return date.getHours().toString().padStart(2, '0') + ':' + 
-             date.getMinutes().toString().padStart(2, '0');
-    }
+  <!-- Tentang Sistem -->
+  <h2 class="section-title">Tentang Sistem Digitalisasi Desa</h2>
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <p class="mobile-optimized-text">Sistem Digitalisasi Desa Pamotan merupakan inovasi untuk menghadirkan solusi pertanian cerdas dengan memanfaatkan teknologi IoT.
+      Dua modul utama — Irigasi dan Pendeteksi Hama — saling terhubung untuk memantau, menganalisis, dan memberikan rekomendasi tindakan secara otomatis.</p>
+      <p class="mobile-optimized-text">Platform ini dirancang dengan prinsip <strong>transparansi data, efisiensi sumber daya,</strong> dan <strong>kemudahan akses</strong> bagi petani maupun pemerintah desa.
+      Dengan integrasi data real-time, sistem ini menjadi langkah nyata menuju desa tangguh dan mandiri teknologi.</p>
+    </div>
+  </div>
+</div>
 
-    // Chart Irigasi
-    new Chart(document.getElementById('chartIrigasi'), {
-      type: 'line',
-      data: {
-        labels: irigasiData.labels.map(label => formatTimeLabel(label)),
-        datasets: [
-          { 
-            label: 'Kelembaban Tanah (%)', 
-            data: irigasiData.soil, 
-            borderColor: '#4caf50', 
-            backgroundColor: 'rgba(76, 175, 80, 0.1)',
-            borderWidth: 2,
-            tension: 0.3,
-            fill: true
-          },
-          { 
-            label: 'Tingkat pH', 
-            data: irigasiData.ph, 
-            borderColor: '#2196f3', 
-            backgroundColor: 'rgba(33, 150, 243, 0.1)',
-            borderWidth: 2,
-            tension: 0.3,
-            fill: true
-          }
-        ]
-      },
-      options: { 
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            position: 'top',
-          },
-          title: {
-            display: true,
-            text: 'Trend Data Irigasi'
-          }
-        },
-        scales: {
-          y: {
-            beginAtZero: false
-          }
-        }
-      }
-    });
+<!-- Footer -->
+<footer>
+  <div class="footer-content">
+    <p class="mb-2">© 2025 Desa Pamotan — Sistem Digitalisasi Desa Berbasis IoT</p>
+    <small>Dikembangkan oleh Tim Pengembang IoT PT AKTARA</small>
+  </div>
+</footer>
 
-    // Chart Hama
-    new Chart(document.getElementById('chartHama'), {
-      type: 'line',
-      data: {
-        labels: hamaData.labels.map(label => formatTimeLabel(label)),
-        datasets: [
-          { 
-            label: 'Suhu (°C)', 
-            data: hamaData.suhu, 
-            borderColor: '#ff5722', 
-            backgroundColor: 'rgba(255, 87, 34, 0.1)',
-            borderWidth: 2,
-            tension: 0.3,
-            fill: true
-          },
-          { 
-            label: 'Kelembaban (%)', 
-            data: hamaData.hum, 
-            borderColor: '#2196f3', 
-            backgroundColor: 'rgba(33, 150, 243, 0.1)',
-            borderWidth: 2,
-            tension: 0.3,
-            fill: true
-          },
-          { 
-            label: 'Curah Hujan (mm)', 
-            data: hamaData.hujan, 
-            borderColor: '#0288d1', 
-            backgroundColor: 'rgba(2, 136, 209, 0.1)',
-            borderWidth: 2,
-            tension: 0.3,
-            fill: true
-          },
-          { 
-            label: 'Kecepatan Angin (km/jam)', 
-            data: hamaData.angin, 
-            borderColor: '#795548', 
-            backgroundColor: 'rgba(121, 85, 72, 0.1)',
-            borderWidth: 2,
-            tension: 0.3,
-            fill: true
-          }
-        ]
-      },
-      options: { 
-        responsive: true,
-        maintainAspectRatio: false,
-        plugins: {
-          legend: {
-            position: 'top',
-          },
-          title: {
-            display: true,
-            text: 'Trend Data Lingkungan'
-          }
-        },
-        scales: {
-          y: {
-            beginAtZero: true
-          }
-        }
-      }
-    });
-  </script>
+<script>
+// Prevent zoom on double tap (iOS)
+let lastTouchEnd = 0;
+document.addEventListener('touchend', function (event) {
+  const now = (new Date()).getTime();
+  if (now - lastTouchEnd <= 300) {
+    event.preventDefault();
+  }
+  lastTouchEnd = now;
+}, false);
+</script>
 </body>
 </html>

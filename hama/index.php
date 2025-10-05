@@ -618,9 +618,10 @@ $riwayat_deteksi = $koneksi->query("SELECT dh.*, h.nama, h.deskripsi, h.solusi
                 position: static;
                 left: 0;
                 width: 280px;
-                height: 100vh;
+                height: 280vh;
                 overflow-y: auto;
             }
+            
             
             .mobile-menu-toggle {
                 display: none;
